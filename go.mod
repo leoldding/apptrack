@@ -3,7 +3,6 @@ module github.com/leoldding/apptrack
 go 1.22.1
 
 require (
-	github.com/joho/godotenv v1.5.1
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/net v0.22.0
 )

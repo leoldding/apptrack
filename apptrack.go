@@ -12,7 +12,6 @@ import (
     "strings"
     "time"
 
-    "github.com/joho/godotenv"
     "github.com/urfave/cli/v2"
     "golang.org/x/net/html"
 )
@@ -51,10 +50,6 @@ func main() {
             },
         },
         Action: func(cCtx *cli.Context) error {
-            err := godotenv.Load("./.env")
-            if err != nil {
-                return err
-            }
             requestData := RequestData{}
             requestData.Properties = make(map[string]interface{})
             if !save {
@@ -302,9 +297,9 @@ func getAttributes(reader io.Reader, requestData *RequestData) error {
 }
 
 func notionRequest(requestData RequestData) {
-    apiKey := os.Getenv("NOTION_API_KEY")
-
-    databaseID := os.Getenv("NOTION_DATABASE_ID")
+    apiKey := os.Getenv("APPTRACK_NOTION_API_KEY")
+    fmt.Println(apiKey)
+    databaseID := os.Getenv("APPTRACK_NOTION_DATABASE_ID")
 
     apiUrl := "https://api.notion.com/v1/pages"
 
