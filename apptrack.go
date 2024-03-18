@@ -56,7 +56,7 @@ func main() {
                 requestData.Properties["Date Applied"] = map[string]interface{}{
                     "type": "date",
                     "date": map[string]string {
-                        "start": time.Now().Format("2006-01-02T15:04:05-0700"), 
+                        "start": time.Now().Format("2006-01-02"), 
                     },
                 }
                 requestData.Properties["Status"] = map[string]interface{}{
