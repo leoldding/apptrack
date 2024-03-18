@@ -298,7 +298,6 @@ func getAttributes(reader io.Reader, requestData *RequestData) error {
 
 func notionRequest(requestData RequestData) {
     apiKey := os.Getenv("APPTRACK_NOTION_API_KEY")
-    fmt.Println(apiKey)
     databaseID := os.Getenv("APPTRACK_NOTION_DATABASE_ID")
 
     apiUrl := "https://api.notion.com/v1/pages"
