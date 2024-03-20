@@ -1,19 +1,20 @@
 package main
 
 import (
-    "bufio"
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "io"
-    "log"
-    "net/http"
-    "os"
-    "strings"
-    "time"
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"regexp"
+	"strings"
+	"time"
 
-    "github.com/urfave/cli/v2"
-    "golang.org/x/net/html"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/net/html"
 )
 
 type RequestData struct {
@@ -78,8 +79,7 @@ func main() {
             if manual {
                 manualInput(&requestData) 
             } else {
-                link := getLink()
-                scrapeLink(link, &requestData)
+                scrapeLink(&requestData)
             } 
 
             notionRequest(requestData)
@@ -93,17 +93,23 @@ func main() {
     }
 }
 
-func manualInput(requestData *RequestData) {    
+func getInput(property string) string {
+    var input string
     reader := bufio.NewReader(os.Stdin)
-
-    if _, ok := requestData.Properties["Company"]; !ok {
-        fmt.Print("Enter company: ")
-        input, _ := reader.ReadString('\n')
-        for input == "\n" {
-            fmt.Println("Input can't be empty!")
-            fmt.Print("Enter company: ")
-            input, _ = reader.ReadString('\n')
+    for {
+        fmt.Print("Enter " + property + ": ")
+        input, _ = reader.ReadString('\n')
+        if input != "\n" {
+            break
         }
+        fmt.Println("Input can't be empty!")
+    }
+    return input
+}
+
+func manualInput(requestData *RequestData) {    
+    if _, ok := requestData.Properties["Company"]; !ok {
+        input := getInput("company")
         requestData.Properties["Company"] = map[string]interface{}{
             "type": "title",
             "title": []map[string]interface{}{
@@ -118,13 +124,7 @@ func manualInput(requestData *RequestData) {
     }
 
     if _, ok := requestData.Properties["Position"]; !ok {
-        fmt.Print("Enter position: ")
-        input, _ := reader.ReadString('\n')
-        for input == "\n" {
-            fmt.Println("Input can't be empty!")
-            fmt.Print("Enter position: ")
-            input, _ = reader.ReadString('\n')
-        }
+        input := getInput("position")
         requestData.Properties["Position"] = map[string]interface{}{
             "rich_text": []map[string]interface{}{
                 {
@@ -138,13 +138,7 @@ func manualInput(requestData *RequestData) {
     }
 
     if _, ok := requestData.Properties["Location"]; !ok {
-        fmt.Print("Enter location: ")
-        input, _ := reader.ReadString('\n')
-        for input == "\n" {
-            fmt.Println("Input can't be empty!")
-            fmt.Print("Enter location: ")
-            input, _ = reader.ReadString('\n')
-        }
+        input := getInput("location")
         requestData.Properties["Location"] = map[string]interface{}{
             "rich_text": []map[string]interface{}{
                 {
@@ -158,13 +152,7 @@ func manualInput(requestData *RequestData) {
     }
 
     if _, ok := requestData.Properties["Link"]; !ok {
-        fmt.Print("Enter link: ")
-        input, _ := reader.ReadString('\n')
-        for input == "\n" {
-            fmt.Println("Input can't be empty!")
-            fmt.Print("Enter link: ")
-            input, _ = reader.ReadString('\n')
-        }
+        input := getInput("link")
         requestData.Properties["Link"] = map[string]interface{}{
             "type": "url",
             "url": strings.TrimSpace(input),
@@ -172,17 +160,9 @@ func manualInput(requestData *RequestData) {
     }    
 }
 
-func getLink() string {
-    reader := bufio.NewReader(os.Stdin)
-    fmt.Print("Enter link: ")
-    link, _  := reader.ReadString('\n')
-    return link
-}
-
-func scrapeLink(link string, requestData *RequestData) {
-    jobId := strings.FieldsFunc(link, func(r rune) bool {
-        return strings.ContainsRune("=&", r)
-    })[1]
+func scrapeLink(requestData *RequestData) {
+    link := getInput("link")
+    jobId := getJobId(link)
 
     jobLink := "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/" + jobId
     requestData.Properties["Link"] = map[string]interface{}{
@@ -216,6 +196,11 @@ func scrapeLink(link string, requestData *RequestData) {
     if missing {
         manualInput(requestData)
     }
+}
+
+func getJobId(link string) string {
+    re := regexp.MustCompile(`\d{9,}`)
+    return string(re.Find([]byte(link)))
 }
 
 func getContent(link string) (io.Reader, error) {
