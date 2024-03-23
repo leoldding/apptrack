@@ -1,21 +1,66 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"os"
-	"regexp"
-	"strings"
-	"time"
+    "bufio"
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "log"
+    "net/http"
+    "os"
+    "regexp"
+    "strings"
+    "time"
 
-	"github.com/urfave/cli/v2"
-	"golang.org/x/net/html"
+    "github.com/urfave/cli/v2"
+    "golang.org/x/net/html"
 )
+
+type Parser interface {
+    Parse(*html.Node)
+    GetLink() string
+    GetData() *RequestData
+}
+
+type LinkedIn struct {
+    Link string
+    Data *RequestData
+}
+
+func (l LinkedIn) GetLink() string {
+    return l.Link
+}
+
+func (l LinkedIn) GetData() *RequestData {
+    return l.Data
+}
+
+type Greenhouse struct {
+    Data *RequestData
+}
+
+func (g Greenhouse) GetLink() string {
+    property := g.Data.Properties["Link"].(map[string]interface{})
+    return property["url"].(string)
+}
+
+func (g Greenhouse) GetData() *RequestData {
+    return g.Data
+}
+
+type Lever struct {
+    Data *RequestData
+}
+
+func (l Lever) GetLink() string {
+    property := l.Data.Properties["Link"].(map[string]interface{})
+    return property["url"].(string)
+}
+
+func (l Lever) GetData() *RequestData {
+    return l.Data
+}
 
 type RequestData struct {
     Parent Parent `json:"parent"`
@@ -49,7 +94,7 @@ func main() {
                 Usage:      "fill in attributes manually",
                 Destination:&manual,
             },
-        },
+        }, 
         Action: func(cCtx *cli.Context) error {
             requestData := RequestData{}
             requestData.Properties = make(map[string]interface{})
@@ -76,13 +121,21 @@ func main() {
 
             }
 
-            if manual {
-                manualInput(&requestData) 
+            var link string
+            if cCtx.Args().Len() > 0 {
+                link = cCtx.Args().Get(0)
             } else {
-                scrapeLink(&requestData)
-            } 
+                link = getInput("link")
+            }
 
-            notionRequest(requestData)
+            parser := getParser(link, &requestData)
+            if manual || parser == nil {
+                manualInput(&requestData)
+                notionRequest(requestData)
+            } else {
+                scrapeLink(parser)
+                notionRequest(*parser.GetData())
+            }
 
             return nil
         },
@@ -105,6 +158,49 @@ func getInput(property string) string {
         fmt.Println("Input can't be empty!")
     }
     return input
+}
+
+func getParser(link string, data *RequestData) Parser {
+    if strings.Contains(link, "linkedin.com") {
+        re := regexp.MustCompile(`\d{9,}`)
+        jobId := string(re.Find([]byte(link)))
+        jobLink := "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/" + jobId
+        data.Properties["Link"] = map[string]interface{}{
+            "type": "url",
+            "url": "https://www.linkedin.com/jobs/view/" + jobId,
+        }
+        return LinkedIn{Link: jobLink, Data: data}
+    } else if strings.Contains(link, "boards.greenhouse.io") {
+        data.Properties["Link"] = map[string]interface{}{
+            "type": "url",
+            "url": strings.TrimSpace(link),
+        }
+        return Greenhouse{Data: data}
+    } else if strings.Contains(link, "jobs.lever.co") {
+        data.Properties["Link"] = map[string]interface{}{
+            "type": "url",
+            "url": strings.TrimSpace(link),
+        }
+        re := regexp.MustCompile(`jobs.lever.co/(.*)/`)
+        companyName := re.FindStringSubmatch(link)[1]
+        data.Properties["Company"] = map[string]interface{}{
+            "type": "title",
+            "title": []map[string]interface{}{
+                {
+                    "type": "text",
+                    "text": map[string]string{
+                        "content": companyName,
+                    },
+                },
+            },
+        }
+        return Lever{Data: data}
+    }
+    data.Properties["Link"] = map[string]interface{}{
+        "type": "url",
+        "url": strings.TrimSpace(link),
+    }
+    return nil
 }
 
 func manualInput(requestData *RequestData) {    
@@ -150,57 +246,41 @@ func manualInput(requestData *RequestData) {
             },
         }
     }
-
-    if _, ok := requestData.Properties["Link"]; !ok {
-        input := getInput("link")
-        requestData.Properties["Link"] = map[string]interface{}{
-            "type": "url",
-            "url": strings.TrimSpace(input),
-        }
-    }    
 }
 
-func scrapeLink(requestData *RequestData) {
-    link := getInput("link")
-    jobId := getJobId(link)
-
-    jobLink := "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/" + jobId
-    requestData.Properties["Link"] = map[string]interface{}{
-        "type": "url",
-        "url": "https://www.linkedin.com/jobs/view/" + jobId,
-    }
-
-
+func scrapeLink(parser Parser) {
+    var data *RequestData
     attempts, missing := 0, true
     for attempts < 3 && missing {
         attempts++
-        reader, err := getContent(jobLink)
+        reader, err := getContent(parser.GetLink())
         if err != nil {
             log.Println("Error getting page contents", err)
             continue
         }
-        missing = false
-        err = getAttributes(reader, requestData)
+
+        nodeTree, err := html.Parse(reader)
         if err != nil {
-            log.Println("Error getting attributes", err)
+            log.Println("Error parsing html file", err)
+            continue
         }
-        if _, ok := requestData.Properties["Company"]; !ok {
+
+        parser.Parse(nodeTree)
+        data = parser.GetData()
+
+        missing = false
+        if _, ok := data.Properties["Company"]; !ok {
             missing = true
-        } else if _, ok := requestData.Properties["Position"]; !ok {
+        } else if _, ok := data.Properties["Position"]; !ok {
             missing = true
-        } else if _, ok := requestData.Properties["Location"]; !ok {
+        } else if _, ok := data.Properties["Location"]; !ok {
             missing = true
         }
     }
 
     if missing {
-        manualInput(requestData)
+        manualInput(data)
     }
-}
-
-func getJobId(link string) string {
-    re := regexp.MustCompile(`\d{9,}`)
-    return string(re.Find([]byte(link)))
 }
 
 func getContent(link string) (io.Reader, error) {
@@ -219,66 +299,135 @@ func getContent(link string) (io.Reader, error) {
     return bytes.NewReader(body), nil
 }
 
-func getAttributes(reader io.Reader, requestData *RequestData) error {
-    nodeTree, err := html.Parse(reader)
-    if err != nil {
-        log.Println("Error parsing html file", err)
-        return err
-    }
-
-    var parse func(*html.Node, *RequestData)
-    parse = func(n *html.Node, requestData *RequestData) {
-        if n.Type == html.ElementNode {
-            for _, a := range n.Attr {
-                if a.Key == "class" {
-                    if strings.Contains(a.Val, "topcard__org-name-link") {
-                        requestData.Properties["Company"] = map[string]interface{}{
-                            "type": "title",
-                            "title": []map[string]interface{}{
-                                {
-                                    "type": "text",
-                                    "text": map[string]string{
-                                        "content": strings.TrimSpace(n.FirstChild.Data),
-                                    },
+func (l LinkedIn) Parse(n *html.Node) {
+    if n.Type == html.ElementNode {
+        for _, a := range n.Attr {
+            if a.Key == "class" {
+                if strings.Contains(a.Val, "topcard__org-name-link") {
+                    l.Data.Properties["Company"] = map[string]interface{}{
+                        "type": "title",
+                        "title": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.Data),
                                 },
                             },
-                        }
-
-
-                    } else if strings.Contains(a.Val, "topcard__title") {
-                        requestData.Properties["Position"] = map[string]interface{}{
-                            "rich_text": []map[string]interface{}{
-                                {
-                                    "type": "text",
-                                    "text": map[string]string{
-                                        "content": strings.TrimSpace(n.FirstChild.Data),
-                                    },
+                        },
+                    }
+                } else if strings.Contains(a.Val, "topcard__title") {
+                    l.Data.Properties["Position"] = map[string]interface{}{
+                        "rich_text": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.Data),
                                 },
                             },
-                        }
-                    } else if strings.Contains(a.Val, "topcard__flavor topcard__flavor--bullet") {
-                        requestData.Properties["Location"] = map[string]interface{}{
-                            "rich_text": []map[string]interface{}{
-                                {
-                                    "type": "text",
-                                    "text": map[string]string{
-                                        "content": strings.TrimSpace(n.FirstChild.Data),
-                                    },
+                        },
+                    }
+                } else if strings.Contains(a.Val, "topcard__flavor topcard__flavor--bullet") {
+                    l.Data.Properties["Location"] = map[string]interface{}{
+                        "rich_text": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.Data),
                                 },
                             },
-                        }
+                        },
                     }
                 }
             }
         }
-        for child := n.FirstChild; child != nil; child = child.NextSibling {
-            parse(child, requestData)
+    }
+    for child := n.FirstChild; child != nil; child = child.NextSibling {
+        l.Parse(child)
+    }
+}
+
+func (g Greenhouse) Parse(n *html.Node) {
+    if n.Type == html.ElementNode {
+        for _, a := range n.Attr {
+            if a.Key == "class" {
+                if strings.Contains(a.Val, "company-name") {
+                    re := regexp.MustCompile(`at (.+)`)
+                    textContent := re.FindStringSubmatch(strings.TrimSpace(n.FirstChild.Data))[1]
+                    g.Data.Properties["Company"] = map[string]interface{}{
+                        "type": "title",
+                        "title": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": textContent,
+                                },
+                            },
+                        },
+                    }
+                } else if strings.Contains(a.Val, "app-title") {
+                    g.Data.Properties["Position"] = map[string]interface{}{
+                        "rich_text": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.Data),
+                                },
+                            },
+                        },
+                    }
+                } else if strings.Contains(a.Val, "location") {
+                    g.Data.Properties["Location"] = map[string]interface{}{
+                        "rich_text": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.Data),
+                                },
+                            },
+                        },
+                    }
+                }
+            }
         }
     }
+    for child := n.FirstChild; child != nil; child = child.NextSibling {
+        g.Parse(child)
+    }
+}
 
-    parse(nodeTree, requestData)
-
-    return nil
+func (l Lever) Parse(n *html.Node) {
+    if n.Type == html.ElementNode {
+        for _, a := range n.Attr {
+            if a.Key == "class" {
+                if strings.Contains(a.Val, "posting-headline") {
+                    l.Data.Properties["Position"] = map[string]interface{}{
+                        "rich_text": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.FirstChild.Data),
+                                },
+                            },
+                        },
+                    }
+                } else if strings.Contains(a.Val, "location") {
+                    l.Data.Properties["Location"] = map[string]interface{}{
+                        "rich_text": []map[string]interface{}{
+                            {
+                                "type": "text",
+                                "text": map[string]string{
+                                    "content": strings.TrimSpace(n.FirstChild.Data),
+                                },
+                            },
+                        },
+                    }
+                }
+            }
+        }
+    }
+    for child := n.FirstChild; child != nil; child = child.NextSibling {
+        l.Parse(child)
+    }
 }
 
 func notionRequest(requestData RequestData) {

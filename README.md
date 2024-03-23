@@ -1,7 +1,7 @@
 # Apptrack (Application Tracker)
 
 `apptrack` is a CLI tool for tracking job applications.
-It automatically parses LinkedIn jobs and adds it to a Notion database.
+It automatically parses jobs from LinkedIn, Greenshouse, and Lever and adds it to a Notion database.
 Can also manually fill in information for other websites.
 
 ## Installation 
@@ -53,15 +53,17 @@ Add `APPTRACK_NOTION_DATABASE_ID=<your-database-id>` and `APPTRACK_NOTION_API_KE
 
 ## Usage
 
-### LinkedIn
+Call the tool by running `apptrack "<your-job-link>"`. 
 
-For LinkedIn jobs, simply call the tool using `apptrack` and paste the job link when prompted.
+The tool will automatically check if the job is from **LinkedIn**, **Lever**, or **Greenhouse**.
+If it is from one of those three boards, the tool will attempt to automatically scrape the information.
 If there is any information that was not found, you will be prompted to fill it in.
 
-### Other Jobs
+If the link is from another website, you will simply be prompted to fill in the necessary information.
 
-For other jobs, use the `-manual` or `-m` flag.
-You will simply be prompted for the necessary information to fill in the database row.
+### Manual Input 
+
+If you want to manually input information for any job link, use the `-manual` or `-m` flag and you will be promptedy to fill in information.
 
 ### Saving Jobs
 
